@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Interactive Mandelbrot with Sliders</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #controls {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 8px;
+      z-index: 10;
+      user-select: none;
+      font-size: 14px;
+    }
+
+    #controls label {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    #controls input[type=range] {
+      width: 150px;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="glcanvas"></canvas>
+
+  <!-- Control Panel UI -->
+  <div id="controls">
+    <label>Z₀ real:
+      <input type="range" id="z0_real" min="-1" max="1" step="0.01" value="0" />
+      <span id="z0_real_val">0</span>
+    </label>
+
+    <label>Z₀ imag:
+      <input type="range" id="z0_imag" min="-1" max="1" step="0.01" value="0" />
+      <span id="z0_imag_val">0</span>
+    </label>
+
+    <label>Exponent (power):
+      <input type="range" id="power" min="2" max="10" step="0.1" value="2" />
+      <span id="power_val">2</span>
+    </label>
+
+    <label>Max Iterations:
+      <input type="range" id="max_iter" min="20" max="400" step="5" value="100" />
+      <span id="max_iter_val">100</span>
+    </label>
+
+    <button id="reset_view">Reset View</button>
+    <button id="reset_sliders">Reset Sliders</button>
+
+    <div id="formulaDisplay" style="margin-top: 10px; font-weight: bold;"></div>
+  </div>
+
+  <script>
+    // Setup WebGL context
+    const canvas = document.getElementById('glcanvas');
+    const gl = canvas.getContext('webgl2');
+    if (!gl) {
+      alert('WebGL2 not supported on this browser/device.');
+      throw new Error('WebGL2 not supported');
+    }
+
+    // Handle canvas resizing
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Shader sources
+    const vertexShaderSource = `#version 300 es
+    in vec2 a_position;
+    void main() {
+      gl_Position = vec4(a_position, 0, 1);
+    }`;
+
+    const fragmentShaderSource = `#version 300 es
+    precision mediump float;
+
+    uniform vec2 u_resolution;
+    uniform vec2 u_center;
+    uniform float u_scale;
+    uniform int u_maxIterations;
+    uniform vec2 u_z0;
+    uniform float u_power;
+
+    out vec4 outColor;
+
+    vec2 complexPow(vec2 base, float exponent) {
+      float r = length(base);
+      float theta = atan(base.y, base.x);
+      float rPow = pow(r, exponent);
+      float angle = theta * exponent;
+      return vec2(rPow * cos(angle), rPow * sin(angle));
+    }
+
+    void main() {
+      vec2 c = vec2(
+        (gl_FragCoord.x - u_resolution.x / 2.0) * u_scale + u_center.x,
+        (gl_FragCoord.y - u_resolution.y / 2.0) * u_scale + u_center.y
+      );
+
+      vec2 z = u_z0;
+      int i;
+      for (i = 0; i < u_maxIterations; i++) {
+        z = complexPow(z, u_power) + c;
+        if (dot(z, z) > 4.0) break;
+      }
+
+      float t = float(i) / float(u_maxIterations);
+      vec3 color = (i == u_maxIterations) ? vec3(0.0) : 0.5 + 0.5 * cos(6.2831 * (t + vec3(0.0, 0.33, 0.67)));
+      outColor = vec4(color, 1.0);
+    }`;
+
+    // Shader compilation utility
+    function compileShader(type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compile failed:', gl.getShaderInfoLog(shader));
+        return null;
+      }
+      return shader;
+    }
+
+    // Compile shaders and create program
+    const vertexShader = compileShader(gl.VERTEX_SHADER, vertexShaderSource);
+    const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    // Create vertices and bind
+    const vertices = new Float32Array([
+      -1, -1, 1, -1, -1, 1,
+      -1, 1, 1, -1, 1, 1
+    ]);
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+    const positionLocation = gl.getAttribLocation(program, 'a_position');
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    // Uniforms
+    const resolutionLoc = gl.getUniformLocation(program, 'u_resolution');
+    const centerLoc = gl.getUniformLocation(program, 'u_center');
+    const scaleLoc = gl.getUniformLocation(program, 'u_scale');
+    const maxIterLoc = gl.getUniformLocation(program, 'u_maxIterations');
+    const z0Loc = gl.getUniformLocation(program, 'u_z0');
+    const powerLoc = gl.getUniformLocation(program, 'u_power');
+
+    // State variables
+    let scale = 3.0 / canvas.height;
+    let center = { x: -0.5, y: 0.0 };
+
+    // Slider Elements
+    const sliders = {
+      z0Real: document.getElementById('z0_real'),
+      z0Imag: document.getElementById('z0_imag'),
+      power: document.getElementById('power'),
+      maxIter: document.getElementById('max_iter')
+    };
+
+    const sliderVals = {
+      z0Real: document.getElementById('z0_real_val'),
+      z0Imag: document.getElementById('z0_imag_val'),
+      power: document.getElementById('power_val'),
+      maxIter: document.getElementById('max_iter_val')
+    };
+
+    // Drawing the fractal
+    function draw() {
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      let maxIterations = Math.floor(100 + 50 * Math.log10(3.0 / scale));
+      maxIterations = Math.min(maxIterations, parseInt(sliders.maxIter.value));
+
+      gl.uniform2f(resolutionLoc, canvas.width, canvas.height);
+      gl.uniform2f(centerLoc, center.x, center.y);
+      gl.uniform1f(scaleLoc, scale);
+      gl.uniform1i(maxIterLoc, maxIterations);
+
+      gl.uniform2f(z0Loc, parseFloat(sliders.z0Real.value), parseFloat(sliders.z0Imag.value));
+      gl.uniform1f(powerLoc, parseFloat(sliders.power.value));
+
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    // Pan and Zoom interactions
+    canvas.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const zoomFactor = 1.1;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+
+      const xBefore = (mouseX - canvas.width / 2) * scale + center.x;
+      const yBefore = (canvas.height / 2 - mouseY) * scale + center.y;
+
+      scale *= (event.deltaY < 0) ? 1 / zoomFactor : zoomFactor;
+
+      const xAfter = (mouseX - canvas.width / 2) * scale + center.x;
+      const yAfter = (canvas.height / 2 - mouseY) * scale + center.y;
+
+      center.x += xBefore - xAfter;
+      center.y += yBefore - yAfter;
+
+      draw();
+    });
+
+    let isDragging = false, dragStart = {}, centerStart = {};
+    canvas.addEventListener('mousedown', e => {
+      isDragging = true;
+      dragStart = { x: e.clientX, y: e.clientY };
+      centerStart = { ...center };
+    });
+    window.addEventListener('mouseup', () => isDragging = false);
+    window.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      const dx = e.clientX - dragStart.x;
+      const dy = e.clientY - dragStart.y;
+      center.x = centerStart.x - dx * scale;
+      center.y = centerStart.y + dy * scale;
+      draw();
+    });
+
+    // Control resets
+    document.getElementById('reset_view').addEventListener('click', () => {
+      center = { x: -0.5, y: 0.0 };
+      scale = 3.0 / canvas.height;
+      draw();
+    });
+
+    const defaultValues = { z0Real: 0, z0Imag: 0, power: 2, maxIter: 100 };
+    document.getElementById('reset_sliders').addEventListener('click', () => {
+      for (let key in defaultValues) {
+        sliders[key].value = defaultValues[key];
+      }
+      updateValuesAndDraw();
+    });
+
+    function updateValuesAndDraw() {
+      for (let key in sliders) {
+        sliderVals[key].textContent = sliders[key].value;
+      }
+      updateFormulaDisplay();
+      draw();
+    }
+
+    for (let key in sliders) {
+      sliders[key].addEventListener('input', updateValuesAndDraw);
+    }
+
+    function updateFormulaDisplay() {
+      const z0Real = parseFloat(sliders.z0Real.value);
+      const z0Imag = parseFloat(sliders.z0Imag.value);
+      const power = sliders.power.value;
+      const maxIter = sliders.maxIter.value;
+      const imagPart = z0Imag >= 0 ? `+ ${z0Imag}i` : `- ${Math.abs(z0Imag)}i`;
+      document.getElementById('formulaDisplay').textContent =
+        `zₙ₊₁ = zₙ^${power} + c, starting from z₀ = ${z0Real} ${imagPart}, max iterations = ${maxIter}`;
+    }
+
+    // Initialise display
+    updateValuesAndDraw();
+
+  </script>
+</body>
+
+</html>
