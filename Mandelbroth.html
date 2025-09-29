@@ -248,7 +248,7 @@
       center.y += yBefore - yAfter;
 
       draw();
-    });
+    }, { passive: false });
 
     let isDragging = false, dragStart = {}, centerStart = {};
     canvas.addEventListener('mousedown', e => {
