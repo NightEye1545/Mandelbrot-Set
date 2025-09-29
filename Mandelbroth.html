@@ -84,10 +84,20 @@
 
     // Handle canvas resizing
     function resize() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      const dpr = window.devicePixelRatio || 1;
+      const displayWidth  = Math.floor(window.innerWidth  * dpr);
+      const displayHeight = Math.floor(window.innerHeight * dpr);
+    
+      canvas.width = displayWidth;
+      canvas.height = displayHeight;
+    
+      // Keep CSS size as viewport
+      canvas.style.width = '100vw';
+      canvas.style.height = '100vh';
+    
       gl.viewport(0, 0, canvas.width, canvas.height);
     }
+    
     window.addEventListener('resize', resize);
     resize();
 
